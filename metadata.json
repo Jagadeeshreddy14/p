@@ -1,0 +1,6 @@
+{
+  "name": "PG & Hostel Management System",
+  "description": "Enterprise PG & Hostel Management System with Multi-Role Dashboards, Dynamic UPI Payments, Room & Bed Allocation, AI Assistant & Analytics",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
