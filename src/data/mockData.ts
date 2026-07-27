@@ -697,3 +697,39 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
     ipAddress: '192.168.1.12'
   }
 ];
+
+export const INITIAL_NOTIFICATIONS: Notification[] = [
+  {
+    id: 'notif-1',
+    userId: 'u-accountant-1',
+    targetRoles: ['ACCOUNTANT', 'PG_OWNER', 'SUPER_ADMIN'],
+    title: '💳 UPI Payment Pending Verification',
+    message: 'Aarav Mehta (Room 101) uploaded payment screenshot for July 2026 rent (₹9,000).',
+    type: 'RENT',
+    priority: 'MEDIUM',
+    read: false,
+    createdAt: '10 mins ago'
+  },
+  {
+    id: 'notif-2',
+    userId: 'u-warden-1',
+    targetRoles: ['WARDEN', 'PG_OWNER', 'SUPER_ADMIN', 'MAINTENANCE_STAFF'],
+    title: '🚨 Urgent Maintenance Alert',
+    message: 'Urgent: Room 101 filed an AC cooling & water leakage request.',
+    type: 'COMPLAINT',
+    priority: 'URGENT',
+    read: false,
+    createdAt: '25 mins ago'
+  },
+  {
+    id: 'notif-3',
+    userId: 'u-res-1',
+    targetRoles: ['RESIDENT', 'PARENT', 'WARDEN'],
+    title: '📢 Official Notice: Monthly Pest Control',
+    message: 'Routine pest control scheduled for Block A rooms tomorrow between 10 AM - 1 PM.',
+    type: 'NOTICE',
+    priority: 'LOW',
+    read: false,
+    createdAt: '2 hours ago'
+  }
+];

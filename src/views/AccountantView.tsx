@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { FeatureModuleGrid } from '../components/FeatureModuleGrid';
-import { QrCode, CheckCircle2, XCircle, FileText, Download, ShieldCheck, Search } from 'lucide-react';
+import { PermissionGuard } from '../utils/permissions';
+import { QrCode, CheckCircle2, XCircle, FileText, Download, ShieldCheck, Search, Lock } from 'lucide-react';
 
 export const AccountantView: React.FC = () => {
-  const { payments, verifyPayment } = useApp();
+  const { payments, verifyPayment, currentUser } = useApp();
   const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
 
   const pendingList = payments.filter(p => p.status === 'PENDING_VERIFICATION');
@@ -78,19 +78,32 @@ export const AccountantView: React.FC = () => {
                   </button>
                 )}
 
-                <div className="mt-4 flex items-center gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-                  <button
-                    onClick={() => verifyPayment(p.id, 'APPROVED')}
-                    className="flex-1 rounded-xl bg-emerald-600 py-2 text-xs font-bold text-white shadow hover:bg-emerald-700"
+                <div className="mt-4 pt-2 border-t border-slate-200 dark:border-slate-700">
+                  <PermissionGuard
+                    role={currentUser.role}
+                    action="APPROVE_PAYMENT"
+                    fallback={
+                      <div className="flex items-center gap-1.5 justify-center py-2 text-[11px] text-amber-600 dark:text-amber-400 font-semibold bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200/60 dark:border-amber-900/40">
+                        <Lock className="h-3.5 w-3.5" />
+                        <span>Approval restricted to ACCOUNTANT, PG_OWNER & SUPER_ADMIN</span>
+                      </div>
+                    }
                   >
-                    Approve & Issue Receipt
-                  </button>
-                  <button
-                    onClick={() => verifyPayment(p.id, 'REJECTED', 'UTR mismatch')}
-                    className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300"
-                  >
-                    Reject
-                  </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => verifyPayment(p.id, 'APPROVED')}
+                        className="flex-1 rounded-xl bg-emerald-600 py-2 text-xs font-bold text-white shadow hover:bg-emerald-700"
+                      >
+                        Approve & Issue Receipt
+                      </button>
+                      <button
+                        onClick={() => verifyPayment(p.id, 'REJECTED', 'UTR mismatch')}
+                        className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </PermissionGuard>
                 </div>
               </div>
             ))}
@@ -145,9 +158,6 @@ export const AccountantView: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Feature Modules Grid */}
-      <FeatureModuleGrid />
     </div>
   );
 };

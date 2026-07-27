@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { FeatureModuleGrid } from '../components/FeatureModuleGrid';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area } from 'recharts';
 import { Building2, DollarSign, TrendingUp, AlertCircle, Users, Sparkles, CheckCircle2, ChevronRight, QrCode } from 'lucide-react';
 
@@ -149,9 +148,6 @@ export const OwnerView: React.FC = () => {
           </ResponsiveContainer>
         </div>
       </div>
-
-      {/* Feature Modules Grid */}
-      <FeatureModuleGrid />
     </div>
   );
 };

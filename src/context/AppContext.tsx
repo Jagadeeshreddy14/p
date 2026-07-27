@@ -44,6 +44,11 @@ interface AppContextType {
   inventory: InventoryItem[];
   auditLogs: AuditLog[];
   notifications: Notification[];
+  realTimeConnected: boolean;
+  toastNotification: Notification | null;
+  setToastNotification: (notif: Notification | null) => void;
+  markNotificationRead: (notifId: string) => Promise<void>;
+  triggerTestRoleBroadcast: (targetRoles: string[], title: string, message: string) => Promise<void>;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   darkMode: boolean;
@@ -60,6 +65,7 @@ interface AppContextType {
   markAttendance: (residentId: string, status: 'PRESENT' | 'ABSENT' | 'NIGHT_OUT', reason?: string) => Promise<void>;
   addRoom: (roomData: Partial<Room>) => Promise<void>;
   admitResident: (residentData: Partial<Resident>) => Promise<void>;
+  deleteResident: (id: string) => Promise<{ success: boolean; message?: string }>;
   updateUpiSettings: (newUpiId: string, merchantName?: string) => void;
 }
 
@@ -125,33 +131,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [darkMode, setDarkMode] = useState<boolean>(false);
   const [aiDrawerOpen, setAiDrawerOpen] = useState<boolean>(false);
 
-  const [notifications] = useState<Notification[]>([
-    {
-      id: 'notif-1',
-      userId: 'u-1',
-      title: 'UPI Payment Pending Verification',
-      message: 'Aarav Mehta uploaded payment screenshot for July 2026 rent.',
-      type: 'RENT',
-      read: false,
-      createdAt: '10 mins ago'
-    },
-    {
-      id: 'notif-2',
-      userId: 'u-1',
-      title: 'New Complaint Logged',
-      message: 'Room 101 filed an AC cooling issue.',
-      type: 'COMPLAINT',
-      read: false,
-      createdAt: '1 hour ago'
-    }
-  ]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
   const refreshData = async () => {
     try {
       const [
         resPgs, resRooms, resBeds, resResidents, resPayments,
         resComplaints, resVisitors, resAttendance, resNotices,
-        resMenu, resLaundry, resParcels, resInventory, resLogs
+        resMenu, resLaundry, resParcels, resInventory, resLogs, resNotifs
       ] = await Promise.all([
         fetch('/api/pgs').then(r => r.json()),
         fetch('/api/rooms').then(r => r.json()),
@@ -166,7 +153,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         fetch('/api/laundry').then(r => r.json()),
         fetch('/api/parcels').then(r => r.json()),
         fetch('/api/inventory').then(r => r.json()),
-        fetch('/api/audit-logs').then(r => r.json())
+        fetch('/api/audit-logs').then(r => r.json()),
+        fetch(`/api/notifications?role=${currentUser?.role || 'ALL'}&userId=${currentUser?.id || ''}`).then(r => r.json())
       ]);
 
       if (Array.isArray(resPgs)) setPgs(resPgs);
@@ -183,6 +171,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (Array.isArray(resParcels)) setParcels(resParcels);
       if (Array.isArray(resInventory)) setInventory(resInventory);
       if (Array.isArray(resLogs)) setAuditLogs(resLogs);
+      if (Array.isArray(resNotifs)) setNotifications(resNotifs);
     } catch (err) {
       console.warn("Failed fetching backend data, using local state", err);
     }
@@ -191,6 +180,79 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     refreshData();
   }, []);
+
+  const [realTimeConnected, setRealTimeConnected] = useState<boolean>(false);
+  const [toastNotification, setToastNotification] = useState<Notification | null>(null);
+
+  // Real-Time EventSource Subscription Effect based on active role and user ID
+  useEffect(() => {
+    let eventSource: EventSource | null = null;
+    try {
+      const sseUrl = `/api/notifications/subscribe?role=${encodeURIComponent(
+        currentUser.role
+      )}&userId=${encodeURIComponent(currentUser.id)}`;
+
+      eventSource = new EventSource(sseUrl);
+
+      eventSource.addEventListener('init', (e: MessageEvent) => {
+        setRealTimeConnected(true);
+        try {
+          const data = JSON.parse(e.data);
+          if (data.notifications && Array.isArray(data.notifications)) {
+            setNotifications(data.notifications);
+          }
+        } catch (err) {
+          console.error('Error parsing SSE init payload:', err);
+        }
+      });
+
+      eventSource.addEventListener('notification', (e: MessageEvent) => {
+        try {
+          const newNotif: Notification = JSON.parse(e.data);
+          setNotifications((prev) => [newNotif, ...prev.filter((n) => n.id !== newNotif.id)]);
+          setToastNotification(newNotif);
+          refreshData();
+        } catch (err) {
+          console.error('Error parsing SSE notification payload:', err);
+        }
+      });
+
+      eventSource.onerror = () => {
+        setRealTimeConnected(false);
+      };
+    } catch (e) {
+      console.error('Failed establishing EventSource subscription:', e);
+    }
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [currentUser.role, currentUser.id]);
+
+  const markNotificationRead = async (notifId: string) => {
+    try {
+      await fetch('/api/notifications/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notifId, role: currentUser.role })
+      });
+      setNotifications((prev) =>
+        prev.map((n) => (notifId === 'ALL' || n.id === notifId ? { ...n, read: true } : n))
+      );
+    } catch (e) {
+      console.error('Failed to mark notification as read:', e);
+    }
+  };
+
+  const triggerTestRoleBroadcast = async (targetRoles: string[], title: string, message: string) => {
+    await fetch('/api/notifications/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetRoles, title, message, priority: 'HIGH', type: 'SYSTEM' })
+    });
+  };
 
   const setCurrentUserRole = async (role: UserRole) => {
     try {
@@ -237,10 +299,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const verifyPayment = async (id: string, status: 'APPROVED' | 'REJECTED', reason?: string) => {
     const res = await fetch(`/api/payments/${id}/verify`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-role': currentUser.role
+      },
       body: JSON.stringify({ status, rejectionReason: reason, verifiedBy: currentUser.name })
     });
-    if (res.ok) await refreshData();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: 'Verification error' }));
+      alert(`Permission Denied: ${err.message || 'You lack authorization to verify payments.'}`);
+    } else {
+      await refreshData();
+    }
   };
 
   const addComplaint = async (data: Partial<Complaint>) => {
@@ -306,10 +376,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const admitResident = async (residentData: Partial<Resident>) => {
     const res = await fetch('/api/residents/admission', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-role': currentUser.role
+      },
       body: JSON.stringify({ pgId: activePg.id, pgName: activePg.name, ...residentData })
     });
-    if (res.ok) await refreshData();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: 'Admission error' }));
+      alert(`Permission Denied: ${err.message || 'You lack authorization to admit residents.'}`);
+    } else {
+      await refreshData();
+    }
+  };
+
+  const deleteResident = async (id: string): Promise<{ success: boolean; message?: string }> => {
+    try {
+      const res = await fetch(`/api/residents/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': currentUser.role
+        }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, message: data.message || 'Permission denied' };
+      }
+      await refreshData();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network failure' };
+    }
   };
 
   const updateUpiSettings = (newUpiId: string, merchantName?: string) => {
@@ -346,6 +444,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         inventory,
         auditLogs,
         notifications,
+        realTimeConnected,
+        toastNotification,
+        setToastNotification,
+        markNotificationRead,
+        triggerTestRoleBroadcast,
         activeTab,
         setActiveTab,
         darkMode,
@@ -362,6 +465,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         markAttendance,
         addRoom,
         admitResident,
+        deleteResident,
         updateUpiSettings
       }}
     >

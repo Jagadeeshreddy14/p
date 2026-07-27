@@ -1,6 +1,5 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { FeatureModuleGrid } from '../components/FeatureModuleGrid';
 import { SuperAdminUpiSettings } from '../components/SuperAdminUpiSettings';
 import { Building2, ShieldCheck, DollarSign, Users, CheckCircle2, AlertTriangle, ArrowUpRight, Plus, Award } from 'lucide-react';
 
@@ -129,9 +128,6 @@ export const SuperAdminView: React.FC = () => {
 
       {/* Super Admin Global UPI & Gateway Settings */}
       <SuperAdminUpiSettings />
-
-      {/* Feature Modules Grid */}
-      <FeatureModuleGrid />
     </div>
   );
 };

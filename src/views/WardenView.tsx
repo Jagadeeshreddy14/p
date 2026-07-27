@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { FeatureModuleGrid } from '../components/FeatureModuleGrid';
 import { UserCheck, Clock, UserPlus, AlertCircle, ShieldAlert, Check, X, QrCode } from 'lucide-react';
 
 export const WardenView: React.FC<{ initialTab?: 'attendance' | 'visitors' | 'admission' }> = ({ initialTab = 'attendance' }) => {
@@ -241,9 +240,6 @@ export const WardenView: React.FC<{ initialTab?: 'attendance' | 'visitors' | 'ad
           </form>
         </div>
       )}
-
-      {/* Feature Modules Grid */}
-      <FeatureModuleGrid />
     </div>
   );
 };

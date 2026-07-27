@@ -1,6 +1,5 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { FeatureModuleGrid } from '../components/FeatureModuleGrid';
 import { ShieldCheck, Clock, PhoneCall, QrCode, Heart, CheckCircle2 } from 'lucide-react';
 
 export const ParentView: React.FC = () => {
@@ -61,9 +60,6 @@ export const ParentView: React.FC = () => {
           ))}
         </div>
       </div>
-
-      {/* Feature Modules Grid */}
-      <FeatureModuleGrid />
     </div>
   );
 };

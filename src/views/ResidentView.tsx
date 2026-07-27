@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { DigitalIdCard } from '../components/DigitalIdCard';
 import { UpiPaymentModal } from '../components/UpiPaymentModal';
-import { FeatureModuleGrid } from '../components/FeatureModuleGrid';
 import { QrCode, AlertCircle, Utensils, Shirt, Package, Sparkles, CheckCircle2, ChevronRight, Phone } from 'lucide-react';
 
 export const ResidentView: React.FC = () => {
@@ -177,9 +176,6 @@ export const ResidentView: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* Complete Platform Feature Modules Grid */}
-      <FeatureModuleGrid />
     </div>
   );
 };

@@ -312,12 +312,16 @@ export interface ParcelItem {
 
 export interface Notification {
   id: string;
-  userId: string;
+  userId?: string;
+  targetRoles?: (UserRole | 'ALL')[];
   title: string;
   message: string;
-  type: 'RENT' | 'COMPLAINT' | 'NOTICE' | 'VISITOR' | 'SYSTEM' | 'PARCEL';
+  type: 'RENT' | 'COMPLAINT' | 'NOTICE' | 'VISITOR' | 'SYSTEM' | 'PARCEL' | 'ATTENDANCE';
+  priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   read: boolean;
   createdAt: string;
+  actionUrl?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface ChatMessage {

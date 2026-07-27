@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { UserRole } from '../types';
+import { RealTimeNotificationToast } from './RealTimeNotificationToast';
 import {
   Building2,
   Sparkles,
@@ -15,7 +16,11 @@ import {
   X,
   LogOut,
   User as UserIcon,
-  Settings
+  Settings,
+  Zap,
+  Radio,
+  CheckCheck,
+  Send
 } from 'lucide-react';
 
 const ROLES: { role: UserRole; label: string; badgeColor: string }[] = [
@@ -40,6 +45,9 @@ export const Navbar: React.FC = () => {
     setDarkMode,
     setAiDrawerOpen,
     notifications,
+    realTimeConnected,
+    markNotificationRead,
+    triggerTestRoleBroadcast,
     setLogoutModalOpen
   } = useApp();
 
@@ -49,9 +57,13 @@ export const Navbar: React.FC = () => {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
 
   const currentRoleObj = ROLES.find(r => r.role === currentUser.role) || ROLES[0];
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 sm:px-6">
+      {/* Real-time Toast Overlay */}
+      <RealTimeNotificationToast />
+
       {/* Brand & Active PG Selection */}
       <div className="flex items-center gap-3 sm:gap-6">
         <div className="flex items-center gap-2.5">
@@ -171,34 +183,148 @@ export const Navbar: React.FC = () => {
           <span className="hidden sm:inline">AI Copilot</span>
         </button>
 
-        {/* Notifications */}
+        {/* Real-Time Notifications Bell */}
         <div className="relative">
           <button
             onClick={() => setNotifOpen(!notifOpen)}
             className="relative rounded-lg border border-slate-200 p-2 text-slate-600 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
           >
             <Bell className="h-4 w-4" />
-            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold text-white">
-              {notifications.length}
-            </span>
+            {unreadCount > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold text-white shadow animate-pulse">
+                {unreadCount}
+              </span>
+            )}
+            {/* SSE Live Pulse Dot */}
+            <span
+              className={`absolute bottom-0 right-0 h-2 w-2 rounded-full ${
+                realTimeConnected ? 'bg-emerald-500 ring-2 ring-emerald-300 dark:ring-emerald-950' : 'bg-amber-400'
+              }`}
+              title={realTimeConnected ? 'Real-Time SSE Connected' : 'Connecting SSE...'}
+            />
           </button>
 
           {notifOpen && (
-            <div className="absolute right-0 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl dark:border-slate-800 dark:bg-slate-900 z-50">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2 dark:border-slate-800">
-                <span className="text-xs font-bold text-slate-900 dark:text-white">Notifications</span>
+            <div className="absolute right-0 mt-2 w-96 rounded-3xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-800 dark:bg-slate-900 z-50 animate-fade-in space-y-3">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white">
+                    Real-Time Role Subscriptions
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${
+                      realTimeConnected
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300'
+                    }`}
+                  >
+                    <Radio className="h-3 w-3 animate-pulse" />
+                    {realTimeConnected ? 'SSE Live' : 'Connecting'}
+                  </span>
+                </div>
                 <button onClick={() => setNotifOpen(false)}>
-                  <X className="h-3.5 w-3.5 text-slate-400" />
+                  <X className="h-4 w-4 text-slate-400 hover:text-slate-600" />
                 </button>
               </div>
-              <div className="mt-2 space-y-2 max-h-64 overflow-y-auto">
-                {notifications.map((n) => (
-                  <div key={n.id} className="rounded-xl border border-slate-100 bg-slate-50 p-2.5 text-xs dark:border-slate-800/80 dark:bg-slate-800/40">
-                    <div className="font-semibold text-slate-900 dark:text-white">{n.title}</div>
-                    <p className="mt-0.5 text-slate-600 dark:text-slate-300 text-[11px]">{n.message}</p>
-                    <span className="mt-1 block text-[9px] text-slate-400">{n.createdAt}</span>
+
+              {/* Connected Role Subscribed Banner */}
+              <div className="rounded-2xl bg-indigo-50/80 p-2.5 text-xs dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                    <Shield className="h-3 w-3" /> Subscribed Channel: {currentUser.role}
                   </div>
-                ))}
+                  <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                    Listening for instant alerts matching <span className="font-bold">{currentRoleObj.label}</span>
+                  </div>
+                </div>
+                {unreadCount > 0 && (
+                  <button
+                    onClick={() => markNotificationRead('ALL')}
+                    className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:underline dark:text-indigo-400"
+                  >
+                    <CheckCheck className="h-3 w-3" /> Mark All Read
+                  </button>
+                )}
+              </div>
+
+              {/* Notification List */}
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {notifications.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-400">
+                    No active notifications for role {currentUser.role}.
+                  </div>
+                ) : (
+                  notifications.map((n) => (
+                    <div
+                      key={n.id}
+                      onClick={() => markNotificationRead(n.id)}
+                      className={`cursor-pointer rounded-2xl border p-3 transition text-xs space-y-1 ${
+                        !n.read
+                          ? 'border-indigo-200 bg-indigo-50/40 dark:border-indigo-900/60 dark:bg-indigo-950/30'
+                          : 'border-slate-100 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-800/40 opacity-80'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          {!n.read && <span className="h-2 w-2 rounded-full bg-indigo-600 flex-shrink-0" />}
+                          {n.title}
+                        </div>
+                        {n.priority && (
+                          <span
+                            className={`rounded-md px-1.5 py-0.5 text-[9px] font-extrabold ${
+                              n.priority === 'URGENT' || n.priority === 'HIGH'
+                                ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            {n.priority}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
+                        {n.message}
+                      </p>
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                        <span>Target: {n.targetRoles?.join(', ') || 'ALL'}</span>
+                        <span>{n.createdAt}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Interactive Role Push Simulation Tools */}
+              <div className="border-t border-slate-100 pt-2 dark:border-slate-800 space-y-1.5">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                  <Send className="h-3 w-3 text-indigo-500" /> Simulate Real-Time Role Alert Push:
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    onClick={() =>
+                      triggerTestRoleBroadcast(
+                        ['WARDEN', 'PG_OWNER', 'SUPER_ADMIN', 'MAINTENANCE_STAFF'],
+                        '🚨 Urgent Maintenance Alert: Room 204',
+                        'Main water pipe leak reported in Room 204 bathroom. High priority dispatch.'
+                      )
+                    }
+                    className="rounded-xl border border-rose-200 bg-rose-50 px-2 py-1.5 text-[10px] font-bold text-rose-800 hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300 transition text-left"
+                  >
+                    🚨 Push Warden Urgent Alert
+                  </button>
+                  <button
+                    onClick={() =>
+                      triggerTestRoleBroadcast(
+                        ['ACCOUNTANT', 'PG_OWNER', 'SUPER_ADMIN'],
+                        '💳 UPI Rent Uploaded: Room 102',
+                        'Resident Rohan uploaded ₹9,000 screenshot for July rent.'
+                      )
+                    }
+                    className="rounded-xl border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[10px] font-bold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300 transition text-left"
+                  >
+                    💳 Push Accountant Rent Alert
+                  </button>
+                </div>
               </div>
             </div>
           )}

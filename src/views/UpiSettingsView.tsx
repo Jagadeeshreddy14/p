@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { FeatureModuleGrid } from '../components/FeatureModuleGrid';
 import {
   QrCode,
   Building2,
@@ -380,9 +379,6 @@ export const UpiSettingsView: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* Feature Modules Grid */}
-      <FeatureModuleGrid />
     </div>
   );
 };

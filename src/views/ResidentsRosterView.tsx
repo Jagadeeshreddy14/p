@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { hasPermission, PermissionGuard, getRoleAccessLevel } from '../utils/permissions';
 import {
   Users,
   Search,
@@ -15,15 +16,38 @@ import {
   ShieldCheck,
   Building2,
   X,
-  CreditCard
+  CreditCard,
+  Trash2,
+  ShieldAlert,
+  Lock
 } from 'lucide-react';
 
 export const ResidentsRosterView: React.FC = () => {
-  const { residents, admitResident, activePg } = useApp();
+  const { residents, admitResident, deleteResident, activePg, currentUser } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRent, setFilterRent] = useState<'ALL' | 'PAID' | 'DUE' | 'OVERDUE'>('ALL');
   const [admitModalOpen, setAdmitModalOpen] = useState(false);
   const [selectedResident, setSelectedResident] = useState<typeof residents[0] | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const roleInfo = getRoleAccessLevel(currentUser.role);
+  const canDelete = hasPermission(currentUser.role, 'DELETE_RESIDENT');
+  const canAdmit = hasPermission(currentUser.role, 'ADMIT_RESIDENT');
+
+  const handleDeleteResident = async (resId: string, resName: string) => {
+    if (!confirm(`Are you sure you want to permanently delete/evict resident "${resName}"? This operation requires SUPER_ADMIN or PG_OWNER clearance.`)) {
+      return;
+    }
+    setDeletingId(resId);
+    const result = await deleteResident(resId);
+    setDeletingId(null);
+    if (result.success) {
+      alert(`Resident ${resName} removed successfully from directory.`);
+      setSelectedResident(null);
+    } else {
+      alert(`Permission Denied / Error: ${result.message || 'You lack authorization to delete residents.'}`);
+    }
+  };
 
   // Form State
   const [resName, setResName] = useState('');
@@ -85,6 +109,35 @@ export const ResidentsRosterView: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Role Access Level Notice Banner */}
+      <div className="rounded-2xl border border-indigo-100 bg-indigo-50/80 p-3.5 shadow-sm dark:border-indigo-900/60 dark:bg-indigo-950/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="rounded-xl bg-indigo-600 p-2 text-white">
+            <ShieldCheck className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-slate-900 dark:text-white">Active Permission Scope:</span>
+              <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider ${roleInfo.badgeBg} ${roleInfo.badgeText}`}>
+                {roleInfo.label}
+              </span>
+            </div>
+            <p className="text-slate-600 dark:text-slate-300 text-[11px] mt-0.5">
+              {roleInfo.scope} • Sensitive actions (Admit, Evict) are strictly validated against API endpoint matrices.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 font-mono text-[10px]">
+          <span className={`rounded-lg px-2 py-1 font-bold ${canAdmit ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'}`}>
+            Admit: {canAdmit ? 'ALLOWED' : 'LOCKED'}
+          </span>
+          <span className={`rounded-lg px-2 py-1 font-bold ${canDelete ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300' : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'}`}>
+            Evict: {canDelete ? 'ALLOWED' : 'LOCKED'}
+          </span>
+        </div>
+      </div>
+
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-200 pb-4 dark:border-slate-800">
         <div>
@@ -106,12 +159,27 @@ export const ResidentsRosterView: React.FC = () => {
           >
             <Download className="h-4 w-4" /> Export CSV
           </button>
-          <button
-            onClick={() => setAdmitModalOpen(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-indigo-600/20 hover:bg-indigo-700"
+
+          <PermissionGuard
+            role={currentUser.role}
+            action="ADMIT_RESIDENT"
+            fallback={
+              <button
+                disabled
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-200 px-4 py-2 text-xs font-bold text-slate-400 cursor-not-allowed dark:bg-slate-800 dark:text-slate-600"
+                title="Admitting residents requires Super Admin, PG Owner, or Warden privilege"
+              >
+                <Lock className="h-3.5 w-3.5" /> Admit Resident
+              </button>
+            }
           >
-            <UserPlus className="h-4 w-4" /> Admit New Resident
-          </button>
+            <button
+              onClick={() => setAdmitModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-indigo-600/20 hover:bg-indigo-700"
+            >
+              <UserPlus className="h-4 w-4" /> Admit New Resident
+            </button>
+          </PermissionGuard>
         </div>
       </div>
 
@@ -291,7 +359,27 @@ export const ResidentsRosterView: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+              <PermissionGuard
+                role={currentUser.role}
+                action="DELETE_RESIDENT"
+                fallback={
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-medium">
+                    <Lock className="h-3 w-3 text-amber-500" />
+                    <span>Eviction / Deletion restricted to SUPER_ADMIN & PG_OWNER</span>
+                  </div>
+                }
+              >
+                <button
+                  disabled={deletingId === selectedResident.id}
+                  onClick={() => handleDeleteResident(selectedResident.id, selectedResident.name)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300 transition"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {deletingId === selectedResident.id ? 'Deleting...' : 'Delete / Evict Tenant'}
+                </button>
+              </PermissionGuard>
+
               <button
                 onClick={() => setSelectedResident(null)}
                 className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300"

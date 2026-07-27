@@ -19,7 +19,8 @@ import {
   INITIAL_PARCELS,
   INITIAL_INVENTORY,
   INITIAL_STAFF,
-  INITIAL_AUDIT_LOGS
+  INITIAL_AUDIT_LOGS,
+  INITIAL_NOTIFICATIONS
 } from "./src/data/mockData";
 
 // Server State Store
@@ -40,7 +41,56 @@ const db = {
   parcels: [...INITIAL_PARCELS],
   inventory: [...INITIAL_INVENTORY],
   staff: [...INITIAL_STAFF],
-  auditLogs: [...INITIAL_AUDIT_LOGS]
+  auditLogs: [...INITIAL_AUDIT_LOGS],
+  notifications: [...INITIAL_NOTIFICATIONS]
+};
+
+// Real-Time SSE Subscription Clients
+interface SseClient {
+  id: number;
+  role: string;
+  userId: string;
+  res: express.Response;
+}
+let sseClients: SseClient[] = [];
+
+// Real-Time Notification Broadcast Helper
+const sendRealTimeNotification = (notifData: {
+  title: string;
+  message: string;
+  type: 'RENT' | 'COMPLAINT' | 'NOTICE' | 'VISITOR' | 'SYSTEM' | 'PARCEL' | 'ATTENDANCE';
+  targetRoles?: string[];
+  userId?: string;
+  priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+}) => {
+  const notification = {
+    id: `notif-${Date.now()}`,
+    read: false,
+    createdAt: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+    targetRoles: notifData.targetRoles || ['ALL'],
+    ...notifData
+  };
+
+  db.notifications.unshift(notification as any);
+
+  // Push real-time alert event to connected role subscribers
+  sseClients.forEach((client) => {
+    const isRoleMatch =
+      !notification.targetRoles ||
+      notification.targetRoles.includes("ALL") ||
+      notification.targetRoles.includes(client.role);
+    const isUserMatch = notification.userId && notification.userId === client.userId;
+
+    if (isRoleMatch || isUserMatch) {
+      try {
+        client.res.write(`event: notification\ndata: ${JSON.stringify(notification)}\n\n`);
+      } catch (err) {
+        console.error("Failed to push SSE notification to client:", err);
+      }
+    }
+  });
+
+  return notification;
 };
 
 // Initialize Gemini Client
@@ -77,11 +127,45 @@ async function startServer() {
     });
   };
 
+  // Granular Permission Verification Guard Helper
+  const verifyPermission = (req: express.Request, res: express.Response, allowedRoles: string[], actionName: string) => {
+    const role = (req.headers['x-user-role'] as string) || (req.query.role as string) || (req.body && req.body.userRole) || 'RESIDENT';
+    if (!allowedRoles.includes(role)) {
+      res.status(403).json({
+        error: "ACCESS_DENIED",
+        message: `Action '${actionName}' requires role privilege (${allowedRoles.join(' or ')}). Current role: '${role}'.`,
+        actionName,
+        requiredRoles: allowedRoles,
+        currentRole: role
+      });
+      return false;
+    }
+    return true;
+  };
+
   // --- API ROUTES ---
 
   // Health check
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", appName: "PG & Hostel Management System" });
+  });
+
+  // Granular Permissions Roster Endpoint
+  app.get("/api/auth/permissions", (req, res) => {
+    const role = (req.query.role as string) || 'RESIDENT';
+    res.json({
+      role,
+      permissions: {
+        SUPER_ADMIN: ['ADMIT_RESIDENT', 'DELETE_RESIDENT', 'APPROVE_PAYMENT', 'EDIT_UPI_SETTINGS', 'ADD_ROOM', 'DELETE_ROOM', 'MANAGE_STAFF'],
+        PG_OWNER: ['ADMIT_RESIDENT', 'DELETE_RESIDENT', 'APPROVE_PAYMENT', 'EDIT_UPI_SETTINGS', 'ADD_ROOM', 'DELETE_ROOM', 'MANAGE_STAFF'],
+        WARDEN: ['ADMIT_RESIDENT', 'EDIT_RESIDENT', 'UPDATE_ROOM_BEDS', 'LOG_VISITOR', 'MARK_ATTENDANCE', 'CREATE_NOTICE'],
+        ACCOUNTANT: ['APPROVE_PAYMENT', 'REJECT_PAYMENT', 'EDIT_UPI_SETTINGS', 'VIEW_FINANCIALS'],
+        RESIDENT: ['FILE_COMPLAINT', 'VIEW_FINANCIALS', 'MARK_ATTENDANCE'],
+        PARENT: ['VIEW_FINANCIALS', 'VIEW_RESIDENT_ROSTER'],
+        MAINTENANCE_STAFF: ['UPDATE_COMPLAINT_STATUS'],
+        RECEPTIONIST: ['LOG_VISITOR', 'MARK_ATTENDANCE']
+      }
+    });
   });
 
   // Auth / Role Switcher
@@ -162,6 +246,8 @@ async function startServer() {
   });
 
   app.post("/api/residents/admission", (req, res) => {
+    if (!verifyPermission(req, res, ['SUPER_ADMIN', 'PG_OWNER', 'WARDEN'], 'ADMIT_RESIDENT')) return;
+
     const data = req.body;
     const newResident = {
       id: `res-${Date.now()}`,
@@ -182,8 +268,30 @@ async function startServer() {
       bed.residentPhone = newResident.phone;
     }
 
-    logAudit("RESIDENT_ADMITTED", "Warden", "WARDEN", `Admitted ${newResident.name} to Room ${newResident.roomNumber}`);
+    logAudit("RESIDENT_ADMITTED", "System", "WARDEN", `Admitted ${newResident.name} to Room ${newResident.roomNumber}`);
     res.status(201).json(newResident);
+  });
+
+  app.delete("/api/residents/:id", (req, res) => {
+    if (!verifyPermission(req, res, ['SUPER_ADMIN', 'PG_OWNER'], 'DELETE_RESIDENT')) return;
+
+    const resId = req.params.id;
+    const idx = db.residents.findIndex(r => r.id === resId);
+    if (idx === -1) return res.status(404).json({ error: "Resident not found" });
+
+    const removed = db.residents.splice(idx, 1)[0];
+
+    // Vacate bed
+    const bed = db.beds.find(b => b.residentId === resId);
+    if (bed) {
+      bed.status = "VACANT";
+      bed.residentId = undefined;
+      bed.residentName = undefined;
+      bed.residentPhone = undefined;
+    }
+
+    logAudit("RESIDENT_DELETED", "Admin", "PG_OWNER", `Evicted / Deleted resident record: ${removed.name}`);
+    res.json({ success: true, removedResident: removed });
   });
 
   // Rent Payments API
@@ -219,10 +327,22 @@ async function startServer() {
 
     db.payments.unshift(newPayment);
     logAudit("UPI_PAYMENT_SUBMITTED", resident.name, "RESIDENT", `Uploaded UPI screenshot for ${month}`);
+
+    // Push real-time alert to Accountant, PG Owner, and Super Admin roles
+    sendRealTimeNotification({
+      title: '💳 UPI Rent Payment Uploaded',
+      message: `${resident.name} (Room ${resident.roomNumber}) submitted ₹${amount} for ${month}. Pending accountant verification.`,
+      type: 'RENT',
+      targetRoles: ['ACCOUNTANT', 'PG_OWNER', 'SUPER_ADMIN'],
+      priority: 'MEDIUM'
+    });
+
     res.json(newPayment);
   });
 
   app.post("/api/payments/:id/verify", (req, res) => {
+    if (!verifyPermission(req, res, ['SUPER_ADMIN', 'PG_OWNER', 'ACCOUNTANT'], 'APPROVE_PAYMENT')) return;
+
     const { status, rejectionReason, verifiedBy } = req.body;
     const payment = db.payments.find(p => p.id === req.params.id);
     if (!payment) return res.status(404).json({ error: "Payment not found" });
@@ -240,6 +360,19 @@ async function startServer() {
     }
 
     logAudit("PAYMENT_VERIFIED", verifiedBy || "Accountant", "ACCOUNTANT", `Status set to ${status} for ${payment.residentName}`);
+
+    // Push real-time alert to Resident role
+    sendRealTimeNotification({
+      title: status === 'APPROVED' ? '✅ Rent Receipt Approved' : '❌ Rent Payment Verification Issue',
+      message: status === 'APPROVED'
+        ? `Your payment of ₹${payment.amountPaid} for ${payment.month} was verified & approved.`
+        : `Payment rejected by accountant: ${rejectionReason || 'Please resubmit valid screenshot.'}`,
+      type: 'RENT',
+      targetRoles: ['RESIDENT'],
+      userId: payment.residentId,
+      priority: status === 'APPROVED' ? 'LOW' : 'HIGH'
+    });
+
     res.json(payment);
   });
 
@@ -260,6 +393,21 @@ async function startServer() {
     };
     db.complaints.unshift(newComplaint);
     logAudit("COMPLAINT_FILED", newComplaint.residentName, "RESIDENT", `Filed complaint: ${newComplaint.title}`);
+
+    // PUSH REAL-TIME ALERT TO SPECIFIC ROLES (Wardens, Maintenance, PG Owner, Super Admin)
+    const isUrgent = newComplaint.priority === 'URGENT' || newComplaint.priority === 'HIGH';
+    sendRealTimeNotification({
+      title: isUrgent
+        ? `🚨 URGENT Maintenance Alert: Room ${newComplaint.roomNumber}`
+        : `🔧 Maintenance Ticket Filed: Room ${newComplaint.roomNumber}`,
+      message: `${newComplaint.residentName} registered ${newComplaint.category} issue: "${newComplaint.title}". Priority: ${newComplaint.priority}.`,
+      type: 'COMPLAINT',
+      targetRoles: isUrgent
+        ? ['WARDEN', 'PG_OWNER', 'SUPER_ADMIN', 'MAINTENANCE_STAFF']
+        : ['WARDEN', 'MAINTENANCE_STAFF'],
+      priority: isUrgent ? 'URGENT' : 'MEDIUM'
+    });
+
     res.status(201).json(newComplaint);
   });
 
@@ -267,6 +415,16 @@ async function startServer() {
     const cmp = db.complaints.find(c => c.id === req.params.id);
     if (!cmp) return res.status(404).json({ error: "Complaint not found" });
     Object.assign(cmp, req.body, { updatedAt: new Date().toLocaleString('en-IN') });
+
+    // Push real-time status update to Resident & Staff
+    sendRealTimeNotification({
+      title: `🛠️ Ticket Status Updated: ${cmp.title}`,
+      message: `Status changed to ${cmp.status}.${cmp.assignedStaffName ? ` Assigned tech: ${cmp.assignedStaffName}` : ''}`,
+      type: 'COMPLAINT',
+      targetRoles: ['RESIDENT', 'WARDEN'],
+      priority: 'MEDIUM'
+    });
+
     res.json(cmp);
   });
 
@@ -285,6 +443,15 @@ async function startServer() {
       ...req.body
     };
     db.visitors.unshift(newVisitor);
+
+    sendRealTimeNotification({
+      title: `👤 Visitor Check-In Alert`,
+      message: `${newVisitor.visitorName} checked in to visit ${newVisitor.residentName} (Room ${newVisitor.roomNumber}). Pass: ${newVisitor.passCode}`,
+      type: 'VISITOR',
+      targetRoles: ['WARDEN', 'RECEPTIONIST', 'RESIDENT'],
+      priority: 'LOW'
+    });
+
     res.status(201).json(newVisitor);
   });
 
@@ -311,12 +478,18 @@ async function startServer() {
       checkOutTime: status === 'NIGHT_OUT' ? new Date().toLocaleTimeString('en-IN') : undefined
     };
     db.attendance.unshift(record);
-    res.json(record);
-  });
 
-  // Food Menu API
-  app.get("/api/menu", (_req, res) => {
-    res.json(db.menu);
+    if (status === 'NIGHT_OUT') {
+      sendRealTimeNotification({
+        title: `🌙 Night Out Pass Triggered`,
+        message: `${resident.name} (Room ${resident.roomNumber}) marked Night Out. Reason: ${gatePassReason || 'Overnight stay'}.`,
+        type: 'ATTENDANCE',
+        targetRoles: ['WARDEN', 'PARENT', 'SUPER_ADMIN'],
+        priority: 'HIGH'
+      });
+    }
+
+    res.json(record);
   });
 
   // Notices API
@@ -332,7 +505,85 @@ async function startServer() {
     };
     db.notices.unshift(newNotice);
     logAudit("NOTICE_PUBLISHED", newNotice.postedBy, "WARDEN", `Published notice: ${newNotice.title}`);
+
+    // Broadcast notice to ALL roles
+    sendRealTimeNotification({
+      title: `📢 Broadcast Notice: ${newNotice.title}`,
+      message: `${newNotice.content}`,
+      type: 'NOTICE',
+      targetRoles: ['ALL'],
+      priority: newNotice.isImportant ? 'HIGH' : 'MEDIUM'
+    });
+
     res.status(201).json(newNotice);
+  });
+
+  // REAL-TIME NOTIFICATIONS SUBSCRIPTION (SSE) API
+  app.get("/api/notifications/subscribe", (req, res) => {
+    const role = (req.query.role as string) || "ALL";
+    const userId = (req.query.userId as string) || "anonymous";
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const clientId = Date.now() + Math.random();
+    const client: SseClient = { id: clientId, role, userId, res };
+    sseClients.push(client);
+
+    // Initial state matching client's role or userId
+    const filteredNotifs = db.notifications.filter(
+      n => !n.targetRoles || n.targetRoles.includes("ALL") || n.targetRoles.includes(role as any) || n.userId === userId
+    );
+
+    res.write(`event: init\ndata: ${JSON.stringify({ status: "subscribed", role, userId, notifications: filteredNotifs })}\n\n`);
+
+    const intervalId = setInterval(() => {
+      res.write(`: heartbeat\n\n`);
+    }, 20000);
+
+    req.on("close", () => {
+      clearInterval(intervalId);
+      sseClients = sseClients.filter(c => c.id !== clientId);
+    });
+  });
+
+  app.get("/api/notifications", (req, res) => {
+    const role = (req.query.role as string) || "ALL";
+    const userId = (req.query.userId as string) || "";
+    const filtered = db.notifications.filter(
+      n => !n.targetRoles || n.targetRoles.includes("ALL") || n.targetRoles.includes(role as any) || n.userId === userId
+    );
+    res.json(filtered);
+  });
+
+  app.post("/api/notifications/mark-read", (req, res) => {
+    const { notifId, role } = req.body;
+    if (notifId === 'ALL') {
+      db.notifications.forEach(n => {
+        if (!role || !n.targetRoles || n.targetRoles.includes("ALL") || n.targetRoles.includes(role)) {
+          n.read = true;
+        }
+      });
+    } else {
+      const n = db.notifications.find(item => item.id === notifId);
+      if (n) n.read = true;
+    }
+    res.json({ success: true });
+  });
+
+  app.post("/api/notifications/broadcast", (req, res) => {
+    const { title, message, type, targetRoles, priority } = req.body;
+    const notif = sendRealTimeNotification({
+      title: title || '⚡ Manual Role Broadcast Test',
+      message: message || 'Real-time alert pushed via SSE subscription engine.',
+      type: type || 'SYSTEM',
+      targetRoles: targetRoles || ['WARDEN', 'PG_OWNER', 'SUPER_ADMIN'],
+      priority: priority || 'HIGH'
+    });
+    res.status(201).json(notif);
   });
 
   // Laundry & Parcels
